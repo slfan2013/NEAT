@@ -88,8 +88,10 @@ iteration_sequence = order(dists_to_center, decreasing = FALSE)
 ##
 ## find the overlapping for each direction (The input of the neural network)
 apply(cynodes,1,function(x){
-  x$rx > cynodes$lx & (x$ty > cynodes$by | x$by < cynodes$ty)
+  x$rx > cynodes$lx & (x$ty > cynodes$by &  x$by < cynodes$ty)
 })
+
+cynodes[,3]$rx > cynodes$lx & cynodes[,3]$ty < cynodes$by &  cynodes[,3]$by > cynodes$ty
 
 
 ############### initial population ############### 
