@@ -1,4 +1,4 @@
-pacman::p_load(data.table,nnet,jsonlite)
+pacman::p_load(data.table,nnet,jsonlite,RCurl)
 
 ############### initialization ############### 
 
@@ -47,7 +47,7 @@ connection_node = data.table(in_node = rep(in_node_init, length(out_node_init)),
 cylabel = "Compound_Name"
 
 change_cynode_position_by_suid = function(SUID,x,y){
-  RCurl::getURL('http://localhost:4321/v1/networks/52/views/140/nodes',customrequest='PUT',httpheader=c('Content-Type'='application/json'),postfields= jsonlite::toJSON(
+  RCurl::getURL('http://localhost:1234/v1/networks/52/views/156/nodes',customrequest='PUT',httpheader=c('Content-Type'='application/json'),postfields= jsonlite::toJSON(
     list(list(
       SUID=SUID,
       view = list(
@@ -65,10 +65,13 @@ change_cynode_position_by_suid = function(SUID,x,y){
 }
 change_cynode_position_by_suid(221,-6.416754 ,-123.30798)
 
+
+
+
 ## get node suid, x, y, h, w (label, label font)
-cynodes = data.table(suid = fromJSON("http://localhost:4321/v1/networks/52/nodes"), fromJSON("http://localhost:4321/v1/networks/52/views/140")$elements$nodes$position,label = fromJSON("http://localhost:4321/v1/networks/52/views/140")$elements$nodes$data[[cylabel]])
-cynodes = merge(cynodes, data.table(suid = fromJSON("http://localhost:4321/v1/networks/52/views/140/nodes")$SUID,labelfont = as.numeric(sapply(fromJSON("http://localhost:4321/v1/networks/52/views/140/nodes")$view,function(x){x$value[x$visualProperty == "NODE_LABEL_FONT_SIZE"]}))),by = 'suid',sort = FALSE)
-cynodes = merge(cynodes, data.table(suid = fromJSON("http://localhost:4321/v1/networks/52/views/140/nodes")$SUID,h = as.numeric(sapply(fromJSON("http://localhost:4321/v1/networks/52/views/140/nodes")$view,function(x){x$value[x$visualProperty == "NODE_HEIGHT"]}))),by = 'suid',sort = FALSE)
+cynodes = data.table(suid = fromJSON("http://localhost:1234/v1/networks/52/nodes"), fromJSON("http://localhost:1234/v1/networks/52/views/156")$elements$nodes$position,label = fromJSON("http://localhost:1234/v1/networks/52/views/156")$elements$nodes$data[[cylabel]])
+cynodes = merge(cynodes, data.table(suid = fromJSON("http://localhost:1234/v1/networks/52/views/156/nodes")$SUID,labelfont = as.numeric(sapply(fromJSON("http://localhost:1234/v1/networks/52/views/156/nodes")$view,function(x){x$value[x$visualProperty == "NODE_LABEL_FONT_SIZE"]}))),by = 'suid',sort = FALSE)
+cynodes = merge(cynodes, data.table(suid = fromJSON("http://localhost:1234/v1/networks/52/views/156/nodes")$SUID,h = as.numeric(sapply(fromJSON("http://localhost:1234/v1/networks/52/views/156/nodes")$view,function(x){x$value[x$visualProperty == "NODE_HEIGHT"]}))),by = 'suid',sort = FALSE)
 
 cynodes$w = strwidth(cynodes$label, font = cynodes$labelfont, units = 'in')/strheight(cynodes$label, font = cynodes$labelfont, units = 'in') * cynodes$labelfont
 cynodes$w[is.nan(cynodes$w)] = cynodes$h[is.nan(cynodes$w)]
@@ -87,25 +90,156 @@ dists_to_center = sqrt(colSums((t(cynodes[,c('x','y')]) - center_xy)^2))
 iteration_sequence = order(dists_to_center, decreasing = FALSE)
 ##
 ## find the overlapping for each direction (The input of the neural network)
-apply(cynodes,1,function(x){
-  x$rx > cynodes$lx & (x$ty > cynodes$by &  x$by < cynodes$ty)
-})
+# apply(data.matrix(cynodes),1,function(x){
+#   x$rx > cynodes$lx & (x$ty > cynodes$by &  x$by < cynodes$ty)
+# })
+# # to determine overlapping nodes.
+# cynodes[,3]$rx > cynodes$lx & cynodes[,3]$ty < cynodes$by &  cynodes[,3]$by > cynodes$ty
+# sapply(l, function(x) sapply(l, function(y) foo(x,y)))
+# 
 
-cynodes[,3]$rx > cynodes$lx & cynodes[,3]$ty < cynodes$by &  cynodes[,3]$by > cynodes$ty
+# check overlapping
+check_overlapping = function(cynode1, cynode2){
+  # If one rectangle is on left side of other
+  if (cynode1$lx > cynode2$rx || cynode2$lx > cynode1$rx)
+    {return(FALSE)}
+  
+  # If one rectangle is above other
+  if (cynode1$ty > cynode2$by || cynode2$ty > cynode1$by)
+    {return(FALSE)}
+  
+  return(TRUE)
+}
+
+# for(i in 1:nrow(cynodes)){
+#   print(cynodes$label[i])
+#   print(check_overlapping(cynodes[8,],cynodes[i,]))
+# }
+
+
+indices = cbind(combn(1:ncol(cynodes),2,simplify = T),
+combn(ncol(cynodes):1,2,simplify = T))
+indices = indices[,order(indices[1,],decreasing = FALSE)]
+overlapping_index = apply(indices,2,function(ind){
+  return(check_overlapping(cynode1 = cynodes[ind[1],], cynodes[ind[2],]))
+})
+overlapping_index_for_each_cynode = by(t(rbind(indices[2,],overlapping_index)),indices[1,],function(x){
+  # for(i in 1:nrow(cynodes)){
+    # x = t(rbind(indices[2,],overlapping_index))[indices[1,]==1,]
+    # print(x[1,][x[2,]==1])
+  # }
+  return(x[,1][x[,2]==1])
+})
+## generate input for neural network.
+# the inputs are the most left x distance overlapped by others, most right x distance, most top y distance, and most bottom y distance. (by is larger than ty)
+generate_nn_inputs_for_each_cynode = function(cynodes){
+  return(mapply(function(x,ind){
+    if(length(x)>0){
+      return(abs(c(
+        max(-cynodes[ind,]$w,min(cynodes[x,]$lx - cynodes[ind,]$rx)),
+        min(cynodes[ind,]$w,max(cynodes[x,]$rx - cynodes[ind,]$lx)),
+        max(-cynodes[ind,]$h,min(cynodes[x,]$ty - cynodes[ind,]$by)),
+        min(cynodes[ind,]$h,max(cynodes[x,]$by - cynodes[ind,]$ty))
+      )))
+    }else{
+      return(c(0,0,0,0))
+    }
+    
+  },overlapping_index_for_each_cynode,1:length(overlapping_index_for_each_cynode)))
+}
+
+# calculate score (fitness). #overlapping distance + moving distance
+moving_dist = 0
+generate_overlapping_dist = function(cynodes,overlapping_index_for_each_cynode){
+  return(sum(mapply(function(x,ind){
+    if(length(x)>0){
+      return(
+        sum(abs(c(cynodes[x,]$lx - cynodes[ind,]$rx,cynodes[x,]$rx - cynodes[ind,]$lx,cynodes[x,]$ty - cynodes[ind,]$by,cynodes[x,]$by - cynodes[ind,]$ty)))
+        )
+    }else{
+      return(0)
+    }
+    
+  },overlapping_index_for_each_cynode,1:length(overlapping_index_for_each_cynode))))
+}
+generate_overlapping_dist(cynodes,overlapping_index_for_each_cynode)
+
+
+# evaluate current status
+evaluate_current_status = function(cynodes){
+  # check overlapping
+  indices = cbind(combn(1:ncol(cynodes),2,simplify = T),
+                  combn(ncol(cynodes):1,2,simplify = T))
+  indices = indices[,order(indices[1,],decreasing = FALSE)]
+  overlapping_index = apply(indices,2,function(ind){
+    return(check_overlapping(cynode1 = cynodes[ind[1],], cynodes[ind[2],]))
+  })
+  overlapping_index_for_each_cynode = by(t(rbind(indices[2,],overlapping_index)),indices[1,],function(x){return(x[,1][x[,2]==1])})
+  return(generate_overlapping_dist(cynodes,overlapping_index_for_each_cynode) + moving_dist)
+  
+  
+}
+
+
+
+change_cynode_lables_to_cynodes_index = function(){
+  
+  SUIDs = fromJSON("http://localhost:1234/v1/networks/52/views/156/nodes")$SUID
+  for(SUID in SUIDs ){
+    RCurl::getURL('http://localhost:1234/v1/networks/52/views/156/nodes',customrequest='PUT',httpheader=c('Content-Type'='application/json'),postfields= jsonlite::toJSON(
+      list(list(
+        SUID=SUID,
+        view = list(
+          list(
+            visualProperty= "NODE_LABEL",
+            value=which(cynodes$suid == SUID)
+          )
+        )
+      ))
+      ,auto_unbox = T, force = T))
+  }
+  
+  
+}
+
 
 
 ############### initial population ############### 
 population_tracker = list() # remember the generations of the population
 genomes = list() # each genome in a generation
 for(i in 1:population_size){
-  genomes[[i]] =  data.table(in_node = rep(in_node_init, length(out_node_init)), out_node = rep(out_node_init, each = length(in_node_init)), weight = runif(length(in_node_init)*length(out_node_init), min = -1, max = 1), expressed = expressed_init, innovation_number = innovation_number_init)
+  genomes[[i]] =  data.table(in_node = rep(in_node_init, length(out_node_init)), out_node = rep(out_node_init, each = length(in_node_init)),weight = runif(length(in_node_init)*length(out_node_init), min = -1, max = 1),in_layer = 1, out_layer = 2, in_seq = rep(1:length(in_node_init), length(out_node_init)),out_seq = rep(1:length(out_node_init), each = length(in_node_init)), expressed = expressed_init, innovation_number = innovation_number_init)
 }
 
 
 
-genome = data.table(in_node = rep(in_node_init, length(out_node_init)), out_node = rep(out_node_init, each = length(in_node_init)), weight = runif(length(in_node_init)*length(out_node_init), min = -1, max = 1), expressed = expressed_init, innovation_number = innovation_number_init)
+genome = data.table(in_node = rep(in_node_init, length(out_node_init)), out_node = rep(out_node_init, each = length(in_node_init)),weight = runif(length(in_node_init)*length(out_node_init), min = -1, max = 1),in_layer = 1, out_layer = 2, in_seq = rep(1:length(in_node_init), length(out_node_init)),out_seq = rep(1:length(out_node_init), each = length(in_node_init)), expressed = expressed_init, innovation_number = innovation_number_init)
+genome$out_layer = genome$out_layer+1
+genome = rbind(genome, data.table(in_node = 1,out_node = max(genome$in_node,genome$out_node),weight = runif(1,min=-1,max=1),in_layer = genome$in_layer[genome$in_node==1][1],out_layer=genome$in_layer[genome$in_node==1][1]+1,in_seq=1,out_seq=1,expressed=TRUE,innovation_number = 9))
 
-eval_nodes = function(genome){
+eval_nodes = function(genome,iteration_sequence){
+  # get the input from current status (cynode)
+  generate_nn_inputs_for_each_cynode(cynodes)
+  #!!!
+  iteration_sequence
+  sapply(genomes, function(genome){
+    
+    ## apply nn
+    # generate matrix.
+    x = 1:4 # (input values)
+    for(i in 2:max(genome$out_layer)){
+      W = matrix(0,nrow = sum(genome$out_layer==i), ncol = max(genome$in_node[genome$in_layer==i-1]))
+      W[genome[genome$out_layer==i,]$in_seq,genome[genome$out_layer==i,]$out_seq] = genome[genome$out_layer==i,]$weight
+      
+      
+      wx = W%*%x
+      
+    }
+    
+    
+    
+  })
+  
   
 }
 
