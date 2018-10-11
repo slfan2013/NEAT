@@ -6,6 +6,7 @@ in_node_init = c(1,2,3,4)
 num_output = 2
 out_node_init = max(in_node_init) + 1:num_output
 weight_init = runif(length(in_node_init)*length(out_node_init), min = -1, max = 1)
+
 expressed_init = rep(TRUE, length(in_node_init)*length(out_node_init))
 innovation_number_init = 1:(length(in_node_init)*length(out_node_init))
 innovation_num = length(in_node_init)*length(out_node_init)
@@ -29,10 +30,12 @@ connection_weight_mutate_rate = 0.8
 connection_weight_mutate_perturbed_rate = 0.9
 connection_weight_mutate_new_value = 1-connection_weight_mutate_perturbed_rate
 disabled_rage = 0.75
-crossover_rate = 0.75
+mutation_rate = 0.25
+# crossover_rate = 0.75
 interspecies_mating_rate = 0.001
 add_new_node_rate = 0.03
 link_mutation_rate = 0.05
+add_new_link_rate = 0.3
 transfer_function = function(x){
   return(1/(1+exp(-4.9*x)))
 }
@@ -63,7 +66,7 @@ change_cynode_position_by_suid = function(SUID,x,y){
     ))
     ,auto_unbox = T, force = T))
 }
-change_cynode_position_by_suid(221,-6.416754 ,-123.30798)
+change_cynode_position_by_suid(75,-11.738943,-35.5222373)
 
 
 
@@ -113,12 +116,11 @@ check_overlapping = function(cynode1, cynode2){
 
 # for(i in 1:nrow(cynodes)){
 #   print(cynodes$label[i])
-#   print(check_overlapping(cynodes[8,],cynodes[i,]))
+#   print(check_overlapping(cynodes[12,],cynodes[i,]))
 # }
 
 
-indices = cbind(combn(1:ncol(cynodes),2,simplify = T),
-combn(ncol(cynodes):1,2,simplify = T))
+indices = cbind(combn(1:ncol(cynodes),2,simplify = T),combn(ncol(cynodes):1,2,simplify = T))
 indices = indices[,order(indices[1,],decreasing = FALSE)]
 overlapping_index = apply(indices,2,function(ind){
   return(check_overlapping(cynode1 = cynodes[ind[1],], cynodes[ind[2],]))
