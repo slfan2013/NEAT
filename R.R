@@ -264,9 +264,12 @@ cynodes_origin = cynodes
 cynodes_inputs = generate_nn_inputs_for_each_cynode(cynodes)
 
 
-
+genome_scores = c()
 for(genome_index in 1:length(genomes)){
   print(genome_index)
+  reset(cynodes_origin)
+  cynodes = cynodes_origin
+  moving_dist = 0 # reset to zero for next genome
   genome = genomes[[genome_index]]
   for(num_iter in 1:number_of_iteration){
     print(num_iter)
@@ -278,15 +281,10 @@ for(genome_index in 1:length(genomes)){
       # change position
       suid_index = input_index
       suid = cynodes$suid[[suid_index]]
-      
       dx = evaluated_genome[in_node==out_node,value][1]
       newx = cynodes$x[cynodes$suid==suid] + dx
       dy = evaluated_genome[in_node==out_node,value][2]
       newy = cynodes$y[cynodes$suid==suid] + dy
-      if(suid == "73"){
-        print(dx)
-        print(dy)
-      }
       change_cynode_position_by_suid(SUID = suid,x = newx ,y = newy)
       # update cynode
       cynodes$x[cynodes$suid==suid] = newx
@@ -296,9 +294,10 @@ for(genome_index in 1:length(genomes)){
     }
   }
   # evaluate the current status (after iterations)
-  evaluate_current_status(cynodes)
-  print(moving_dist)
+  genome_scores[genome_index] = evaluate_current_status(cynodes)
 }
+# now it is time to generate the next generation
+
 
 
 reset = function(cynodes){
