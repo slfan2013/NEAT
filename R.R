@@ -365,9 +365,10 @@ next_genomes = genomes[remaining_champion_index]
 # generate new genome crossovers
 # There was an 80% chance of a genome having its connection weights mutated
 for(genome_index in 1:length(genomes)){
+  genome = genomes[[genome_index]]
   if(runif(1)<connection_weight_mutate_rate){
     # in which case each weight had a 90% chance of being uniformly perturbed
-    
+    runif(genome$weight)
     
     
     
