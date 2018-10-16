@@ -52,7 +52,7 @@ activate_function = function(x){
 add_new_link_rate = 0.3
 
 minimum_species_mumber = 5
-
+mutation_ratio = 0.25
 ############### node initialization ###############
 nodes = data.table(id = c(in_node_init,out_node_init),type = c(rep("INPUT",length(in_node_init)),rep("OUTPUT",length(out_node_init)))) # type can be INPUT, OUTPUT, HIDDEN.
 ############### connection_node initialization ############### 
@@ -113,16 +113,16 @@ iteration_sequence = order(dists_to_center, decreasing = FALSE)
 # cynodes[,3]$rx > cynodes$lx & cynodes[,3]$ty < cynodes$by &  cynodes[,3]$by > cynodes$ty
 # sapply(l, function(x) sapply(l, function(y) foo(x,y)))
 # 
-
+cynodes= cynodes[iteration_sequence]
 # check overlapping
 check_overlapping = function(cynode1, cynode2){
   # If one rectangle is on left side of other
   if (cynode1$lx > cynode2$rx || cynode2$lx > cynode1$rx)
-    {return(FALSE)}
+  {return(FALSE)}
   
   # If one rectangle is above other
   if (cynode1$ty > cynode2$by || cynode2$ty > cynode1$by)
-    {return(FALSE)}
+  {return(FALSE)}
   
   return(TRUE)
 }
@@ -171,7 +171,7 @@ generate_overlapping_dist = function(cynodes,overlapping_index_for_each_cynode){
     if(length(x)>0){
       return(
         sum(abs(c(cynodes[x,]$lx - cynodes[ind,]$rx,cynodes[x,]$rx - cynodes[ind,]$lx,cynodes[x,]$ty - cynodes[ind,]$by,cynodes[x,]$by - cynodes[ind,]$ty)))
-        )
+      )
     }else{
       return(0)
     }
@@ -324,7 +324,7 @@ DT[, id := seq_len(.N), by = species_index]
 species_index_temp = paste0(species_index,"_",DT$id)
 species_representative_index = which(species_index_temp%in%species_representative_index_temp)
 names(species_representative_index) = names(table(species_index))
-  
+
 distance_measure = function(genome, representative = genomes[[5]]){
   N = max(length(unique(genome[,in_node],genome[,out_node])),length(unique(representative[,in_node],representative[,out_node])))
   gene_match_genome = genome[innovation_number%in%representative$innovation_number]
@@ -349,17 +349,6 @@ for(genome_index in 1:length(genomes)){
     species_index[genome_index] = paste0("S",max(as.numeric(gsub("S", "", unique(species_index))))+1)
   }
 }
-<<<<<<< HEAD
-visual_net(genome)
-
-
-eval_nodes = function(genome,iteration_sequence){
-  # get the input from current status (cynode)
-  generate_nn_inputs_for_each_cynode(cynodes)
-  #!!!
-  # iteration_sequence
-  sapply(genomes, function(genome){
-=======
 # The champion of each species with more than five networks was copied into the next generation unchanged.
 champion_index = by(genome_scores, species_index,which.min)
 champion_index_temp = paste0(names(champion_index),"_",champion_index)
@@ -373,23 +362,37 @@ remaining_champion_index = champion_index[table(species_index)>minimum_species_m
 next_genomes = list()
 next_genomes = genomes[remaining_champion_index]
 
-# generate new genome crossovers
-# There was an 80% chance of a genome having its connection weights mutated
+perturb = function(x,sd=0.2){
+  return(x + rnorm(1,mean=0,sd))
+}
+## generate new genome
+# mutation
+genome_mutation_index = sample(1:length(genomes), mutation_ratio * length(genomes))
+
 for(genome_index in 1:length(genomes)){
   genome = genomes[[genome_index]]
+  
+  # mutate 1
+  # There was an 80% chance of a genome having its connection weights mutated
   if(runif(1)<connection_weight_mutate_rate){
     # in which case each weight had a 90% chance of being uniformly perturbed
-    runif(genome$weight)
->>>>>>> ee30c97b4e05113c4432dc122e6af40eb4c832c1
-    
-    
-    
-    if(runif(1)<connection_weight_mutate_perturbed_rate){
-      
-    }else{
-      
+    connection_weight_mutate_perturbed_rate_index = runif(genome$weight)<connection_weight_mutate_perturbed_rate
+    for(mutate_index in 1:length(connection_weight_mutate_perturbed_rate_index)){
+      if(!genome[mutate_index,in_node == out_node]){ # just to make sure that the currently gene is not a output node link.
+        if(connection_weight_mutate_perturbed_rate_index[mutate_index]){
+          genome[mutate_index,weight:=perturb(weight)]
+        }else{ # a 10% chance of being assigned a new random value.
+          genome[mutate_index,weight:=runif(1, min = -1, max = 1)]
+        }
+      }
     }
+  }else{ # mutate 2
+    
   }
+  
+  
+  
+  
 }
 
 
