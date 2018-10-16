@@ -343,7 +343,7 @@ eval_nodes = function(genome,iteration_sequence){
   # get the input from current status (cynode)
   generate_nn_inputs_for_each_cynode(cynodes)
   #!!!
-  iteration_sequence
+  # iteration_sequence
   sapply(genomes, function(genome){
     
     ## apply nn
