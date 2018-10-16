@@ -33,7 +33,7 @@ population_size = 150
 c1 = 1
 c2 = 1
 c3 = 0.4
-delta = 3
+distance_criterion = 3
 connection_weight_mutate_rate = 0.8
 connection_weight_mutate_perturbed_rate = 0.9
 connection_weight_mutate_new_value = 1-connection_weight_mutate_perturbed_rate
@@ -50,6 +50,8 @@ activate_function = function(x){
   )
 }
 add_new_link_rate = 0.3
+
+minimum_species_mumber = 5
 
 ############### node initialization ###############
 nodes = data.table(id = c(in_node_init,out_node_init),type = c(rep("INPUT",length(in_node_init)),rep("OUTPUT",length(out_node_init)))) # type can be INPUT, OUTPUT, HIDDEN.
@@ -131,21 +133,22 @@ check_overlapping = function(cynode1, cynode2){
 # }
 
 
-indices = cbind(combn(1:nrow(cynodes),2,simplify = T),combn(nrow(cynodes):1,2,simplify = T))
-indices = indices[,order(indices[1,],decreasing = FALSE)]
-overlapping_index = apply(indices,2,function(ind){
-  return(check_overlapping(cynode1 = cynodes[ind[1],], cynodes[ind[2],]))
-})
-overlapping_index_for_each_cynode = by(t(rbind(indices[2,],overlapping_index)),indices[1,],function(x){
-  # for(i in 1:nrow(cynodes)){
-    # x = t(rbind(indices[2,],overlapping_index))[indices[1,]==1,]
-    # print(x[1,][x[2,]==1])
-  # }
-  return(x[,1][x[,2]==1])
-})
+
 ## generate input for neural network.
 # the inputs are the most left x distance overlapped by others, most right x distance, most top y distance, and most bottom y distance. (by is larger than ty)
 generate_nn_inputs_for_each_cynode = function(cynodes){
+  indices = cbind(combn(1:nrow(cynodes),2,simplify = T),combn(nrow(cynodes):1,2,simplify = T))
+  indices = indices[,order(indices[1,],decreasing = FALSE)]
+  overlapping_index = apply(indices,2,function(ind){
+    return(check_overlapping(cynode1 = cynodes[ind[1],], cynodes[ind[2],]))
+  })
+  overlapping_index_for_each_cynode = by(t(rbind(indices[2,],overlapping_index)),indices[1,],function(x){
+    # for(i in 1:nrow(cynodes)){
+    # x = t(rbind(indices[2,],overlapping_index))[indices[1,]==1,]
+    # print(x[1,][x[2,]==1])
+    # }
+    return(x[,1][x[,2]==1])
+  })
   return(mapply(function(x,ind){
     if(length(x)>0){
       return(abs(c(
@@ -264,7 +267,15 @@ cynodes_origin = cynodes
 cynodes_inputs = generate_nn_inputs_for_each_cynode(cynodes)
 
 
+reset = function(cynodes){
+  for(i in 1:nrow(cynodes)){
+    change_cynode_position_by_suid(SUID = cynodes$suid[i],x = cynodes$x[i] ,y = cynodes$y[i])
+  }
+}
+
+reset(cynodes_origin)
 genome_scores = c()
+species_index = rep(c("S1","S2"),length(genomes)/2)
 for(genome_index in 1:length(genomes)){
   print(genome_index)
   reset(cynodes_origin)
@@ -273,6 +284,7 @@ for(genome_index in 1:length(genomes)){
   genome = genomes[[genome_index]]
   for(num_iter in 1:number_of_iteration){
     print(num_iter)
+    cynodes_inputs = generate_nn_inputs_for_each_cynode(cynodes)
     for(input_index in 1:ncol(cynodes_inputs)){
       input = cynodes_inputs[,input_index]
       genome[!in_node == out_node,value:=input]
@@ -283,8 +295,12 @@ for(genome_index in 1:length(genomes)){
       suid = cynodes$suid[[suid_index]]
       dx = evaluated_genome[in_node==out_node,value][1]
       newx = cynodes$x[cynodes$suid==suid] + dx
+      cynodes$rx[cynodes$suid==suid]= cynodes$rx[cynodes$suid==suid] + dx
+      cynodes$lx[cynodes$suid==suid] = cynodes$lx[cynodes$suid==suid] + dx
       dy = evaluated_genome[in_node==out_node,value][2]
       newy = cynodes$y[cynodes$suid==suid] + dy
+      cynodes$by[cynodes$suid==suid] = cynodes$by[cynodes$suid==suid] + dy
+      cynodes$ty[cynodes$suid==suid] = cynodes$ty[cynodes$suid==suid] + dy
       change_cynode_position_by_suid(SUID = suid,x = newx ,y = newy)
       # update cynode
       cynodes$x[cynodes$suid==suid] = newx
@@ -296,78 +312,71 @@ for(genome_index in 1:length(genomes)){
   # evaluate the current status (after iterations)
   genome_scores[genome_index] = evaluate_current_status(cynodes)
 }
-# now it is time to generate the next generation
-
-
-
-reset = function(cynodes){
-  for(i in 1:nrow(cynodes)){
-    change_cynode_position_by_suid(SUID = cynodes$suid[i],x = cynodes$x[i] ,y = cynodes$y[i])
+########### now it is time to generate the next generation
+## speciation
+# randomly select a species_representative from each species
+species_representative_index = by(1:length(species_index),species_index,function(x){
+  return(sample(1:length(unique(x)),1))
+})
+species_representative_index_temp = paste0(names(species_representative_index),"_",species_representative_index)
+DT = data.table(species_index)
+DT[, id := seq_len(.N), by = species_index]
+species_index_temp = paste0(species_index,"_",DT$id)
+species_representative_index = which(species_index_temp%in%species_representative_index_temp)
+names(species_representative_index) = names(table(species_index))
+  
+distance_measure = function(genome, representative = genomes[[5]]){
+  N = max(length(unique(genome[,in_node],genome[,out_node])),length(unique(representative[,in_node],representative[,out_node])))
+  gene_match_genome = genome[innovation_number%in%representative$innovation_number]
+  gene_match_representative = representative[innovation_number%in%genome$innovation_number]
+  E = max(c(genome$innovation_number,representative$innovation_number)) - (min(max(genome$innovation_number, representative$innovation_number)))
+  D = max(c(genome$innovation_number,representative$innovation_number))-(max(intersect(gene_match_genome$innovation_number,gene_match_representative$innovation_number)))
+  W_bar = sum(abs(gene_match_genome$weight - gene_match_representative$weight))
+  
+  distance = c1*E/N + c2*D/N + c3*W_bar
+  return(distance)
+}
+# use distance measure to update the species
+for(genome_index in 1:length(genomes)){
+  genome = genomes[[genome_index]]
+  species_representative_distances = c()
+  for(representative_index in 1:length(species_representative_index)){
+    species_representative_distances[representative_index] = distance_measure(genome, genomes[[species_representative_index[representative_index]]])
+  }
+  if(any(species_representative_distances<distance_criterion)){ # if the distance is small, it means this genome belongs to a existing species
+    species_index[genome_index] = names(species_representative_index)[which.min(species_representative_distances)]
+  }else{ # otherwise, the genome is a new species.
+    species_index[genome_index] = paste0("S",max(as.numeric(gsub("S", "", unique(species_index))))+1)
   }
 }
-reset(cynodes_origin)
+# The champion of each species with more than five networks was copied into the next generation unchanged.
+champion_index = by(genome_scores, species_index,which.min)
+champion_index_temp = paste0(names(champion_index),"_",champion_index)
+DT = data.table(species_index)
+DT[, id := seq_len(.N), by = species_index]
+species_index_temp = paste0(species_index,"_",DT$id)
+champion_index = which(species_index_temp%in%champion_index_temp)
+names(champion_index) = names(table(species_index))
+remaining_champion_index = champion_index[table(species_index)>minimum_species_mumber]
 
+next_genomes = list()
+next_genomes = genomes[remaining_champion_index]
 
-
-
-
-
-
-
-
-genome = data.table(in_node = rep(in_node_init, length(out_node_init)), out_node = rep(out_node_init, each = length(in_node_init)),weight = runif(length(in_node_init)*length(out_node_init), min = -1, max = 1),in_layer = 1, out_layer = 2, in_seq = rep(1:length(in_node_init), length(out_node_init)),out_seq = rep(1:length(out_node_init), each = length(in_node_init)), expressed = expressed_init, innovation_number = innovation_number_init)
-
-
-
-genome$out_layer = genome$out_layer+1
-
-
-
-# adding a new connection.
-genome = rbind(genome, data.table(in_node = 1,out_node = max(genome$in_node,genome$out_node)+1,weight = runif(1,min=-1,max=1),in_layer = genome$in_layer[genome$in_node==1][1],out_layer=genome$in_layer[genome$in_node==1][1]+1,in_seq=1,out_seq=1,expressed=TRUE,innovation_number = 9))
-genome = rbind(genome, data.table(in_node = 7,out_node = 6,weight = runif(1,min=-1,max=1),in_layer = 2,out_layer=3,in_seq=1,out_seq=2,expressed=TRUE,innovation_number = 10))
-# adding a new connection.
-genome = rbind(genome, data.table(in_node = 4,out_node = 8,weight = runif(1,min=-1,max=1),in_layer = 1,out_layer=2,in_seq=4,out_seq=2,expressed=TRUE,innovation_number = 11))
-genome = rbind(genome, data.table(in_node = 8,out_node = 5,weight = runif(1,min=-1,max=1),in_layer = 2,out_layer=3,in_seq=2,out_seq=1,expressed=TRUE,innovation_number = 12))
-
-visual_net = function(genome){
-  nodes = data.frame(id = 1:max(genome$in_node,genome$out_node),label = 1:max(genome$in_node,genome$out_node))
-  links = data.frame(from = genome$in_node, to = genome$out_node, weight = genome$weight)
-  net <- graph_from_data_frame(d=links, vertices=nodes, directed=T) 
-  plot(net)
-}
-visual_net(genome)
-
-
-eval_nodes = function(genome,iteration_sequence){
-  # get the input from current status (cynode)
-  generate_nn_inputs_for_each_cynode(cynodes)
-  #!!!
-  iteration_sequence
-  sapply(genomes, function(genome){
+# generate new genome crossovers
+# There was an 80% chance of a genome having its connection weights mutated
+for(genome_index in 1:length(genomes)){
+  if(runif(1)<connection_weight_mutate_rate){
+    # in which case each weight had a 90% chance of being uniformly perturbed
     
-    ## apply nn
-    # generate matrix.
-    x = 1:4 # (input values)
-    for(i in 2:max(genome$out_layer)){
+    
+    
+    
+    if(runif(1)<connection_weight_mutate_perturbed_rate){
       
-      
-      W = matrix(0,nrow = length(unique(genome$out_node[genome$out_layer==i])), ncol = length(unique(genome$in_node[genome$in_layer<i])))
-      W[genome[genome$out_layer==i,]$out_seq,genome[genome$out_layer==i,]$in_seq + cumsum(genome[genome$out_layer==i,]$in_layer)] = genome[genome$out_layer==i,]$weight
-      
-      W = matrix(0,nrow = sum(genome$out_layer==i), ncol = max(genome$in_node[genome$in_layer<i]))
-      W[genome[genome$out_layer==i,]$in_seq,genome[genome$out_layer==i,]$out_seq] = genome[genome$out_layer==i,]$weight
-      
-      
-      wx = W%*%x
+    }else{
       
     }
-    
-    
-    
-  })
-  
-  
+  }
 }
 
 
@@ -395,9 +404,3 @@ eval_nodes = function(genome,iteration_sequence){
 
 
 
-
-
-
-
-
-############### mutation ############### 
